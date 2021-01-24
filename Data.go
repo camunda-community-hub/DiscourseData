@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/influxdata/influxdb-client-go/v2"
 )
 
 const lurkers = "5"
@@ -21,14 +22,20 @@ const top50 = "6"
 const top50Posters = "4"
 const mostSolutions = "7"
 
+var queries = [...]string{lurkers, top50, top50Posters, mostSolutions}
+
 // APIKey is your Discpourse API_KEY here
-const APIKey = "0476e2a15a1152d8c00c1eeec60bbcec4977e54b87f2d7556a857e814c5a4fb0"
+const APIKey = "YOURAPIKEY"
 
 // APIUser is your Discourse User ID
-const APIUser = "davidgs"
+const APIUser = "YOURUSERNAME"
 
 // MaxItems is how many records you want to fetch each time
 const MaxItems = "1000"
+
+const token = "YOURTOKEN"
+const bucket = "YOURBUCKET"
+const org = "YOURORG"
 
 // DiscourseUser the full discourse user data
 type DiscourseUser struct {
@@ -175,17 +182,17 @@ type QueryResult struct {
 
 // Results the actual data in the table
 type Results struct {
-	ID           int     `json:"user_id"`
-	Username     string  `json:"username"`
-	Name         string  `json:"name"`
-	CreatedAt    time.Time  `json:"created_at"`
-	LastSeen     time.Time  `json:"last_seen_at"`
-	IPAddress    string  `json:"ip_address"`
-	PostCount    int     `json:"post_count"`
-	PostsCreated int     `json:"posts_created"`
-	PostsRead    int     `json:"posts_read"`
-	SolvedCount  int     `json:"solved_count"`
-	AverageScore float64 `json:"average_score"`
+	ID           int       `json:"user_id"`
+	Username     string    `json:"username"`
+	Name         string    `json:"name"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastSeen     time.Time `json:"last_seen_at"`
+	IPAddress    string    `json:"ip_address"`
+	PostCount    int       `json:"post_count"`
+	PostsCreated int       `json:"posts_created"`
+	PostsRead    int       `json:"posts_read"`
+	SolvedCount  int       `json:"solved_count"`
+	AverageScore float64   `json:"average_score"`
 }
 
 var outFile *os.File
@@ -226,120 +233,128 @@ func getUserName(id int) (DiscourseUser, error) {
 }
 
 func main() {
-
-	outFilePtr := flag.String("out", "out.csv", "an output file.")
-	queryType := flag.String("query", "lurker", "Query Type: [lurker|top50|top50poster|solutions")
-	durationPtr := flag.Int("months", 1, "Number of Months to query")
-	flag.Parse()
-	var queryString = ""
-
-	var qt string
-	if queryType != nil {
-		qt = *queryType
-	}
-	switch qt {
-	case "lurker":
-		queryString = lurkers
-		break
-	case "top50poster":
-		queryString = top50Posters
-		break
-	case "solutions":
-		queryString = mostSolutions
-		break
-	case "top50":
-		queryString = top50
-		break
-	}
-	if *outFilePtr == "" {
-		outFile, err = os.Create("DiscourseQuery.csv")
-		if err != nil {
-			log.Fatal("Could not open file ", err)
-		}
-	} else {
-		outFile, err = os.Create(*outFilePtr)
-		if err != nil {
-			log.Fatal("Open File Error", err)
-		}
-	}
-	defer outFile.Close()
-
+	// You can generate a Token from the "Tokens Tab" in the UI
+	client := influxdb2.NewClient("https://YOURSERVER:8086", token)
+	// always close client at the end
+	defer client.Close()
+	writeAPI := client.WriteAPI(org, bucket)
 	formValues := url.Values{}
-	formValues.Set("months_ago", strconv.Itoa(*durationPtr))
-	//data.Set("bar", "baz")
-
-	var DefaultClient = &http.Client{}
-	urlPlace := "https://forum.camunda.org/admin/plugins/explorer/queries/" + queryString + "/run"
-	request, err := http.NewRequest("POST", urlPlace, strings.NewReader(formValues.Encode()))
-	if err != nil {
-		log.Fatal(err)
-	}
-	request.Header.Set("Content-Type", "multipart/form-data")
-	request.Header.Set("Api-Key", APIKey)
-	request.Header.Set("Api-Username", APIUser)
-	request.Header.Set("Accept", "application/json")
-	var FinalResults []Results
-	var oData = QueryResult{}
-
-	res, err := DefaultClient.Do(request)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if res.StatusCode != 200 {
-		log.Fatal(res.StatusCode)
-	}
-	data, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		log.Fatal("Got no Data")
-	}
-	res.Body.Close()
-	_ = json.Unmarshal(data, &oData)
-
-	var usernameColumn int
-	for z := 0; z < len(oData.Columns); z++ {
-		if oData.Columns[z] == "id" || oData.Columns[z] == "user_id" {
-			usernameColumn = z
-			break
-		}
-	}
-	l := len(oData.Rows)
-	//fmt.Printf("\nRequest Number:\t\t%d\nNumber of records: %d\n", x-1, l)
-	FinalResults = make([]Results, l)
-	for i := 0; i < len(oData.Rows); i++ {
-		//fmt.Println("Reading Record: " + strconv.Itoa(i))
-		rd := oData.Rows[i]
-		info, err := getUserName(int(rd[usernameColumn].(float64)))
-		if err != nil {
-			log.Fatal(err)
-		}
-		FinalResults[i].Username = info.Username
-		FinalResults[i].Name = info.Name
-		FinalResults[i].LastSeen = info.LastSeenAt
-		FinalResults[i].CreatedAt = info.CreatedAt
-		FinalResults[i].IPAddress = info.IPAddress
-		FinalResults[i].PostCount = info.PostCount
-		FinalResults[i].PostsCreated = info.PostCount
-		FinalResults[i].PostsRead = info.PostsReadCount
-		FinalResults[i].ID = info.ID
-		for b := 0; b < len(rd); b++ {
-			dType := fmt.Sprintf("%T", rd[b])
-			switch dType {
-			case "string":
-
-			case "float64":
-				if strings.Contains(oData.Columns[b], "average") {
-					FinalResults[i].AverageScore = rd[b].(float64)
-				} else if strings.Contains(oData.Columns[b], "solved") {
-					FinalResults[i].SolvedCount = int(rd[b].(float64))
-				} else {
-				}
-			case "int":
-			default:
-				fmt.Printf("Type %T Not defined\n", reflect.TypeOf(rd[b]))
+	formValues.Set("months_ago", "1")
+	for {
+		for b := 0; b < len(queries); b++ {
+			fmt.Printf("Running Query: %s\n", queries[b])
+			var DefaultClient = &http.Client{}
+			urlPlace := "https://YOURFORUMS/admin/plugins/explorer/queries/" + queries[b] + "/run"
+			request, err := http.NewRequest("POST", urlPlace, strings.NewReader(formValues.Encode()))
+			if err != nil {
+				fmt.Println("Request Object Failure")
+				log.Fatal(err)
 			}
+			request.Header.Set("Content-Type", "multipart/form-data")
+			request.Header.Set("Api-Key", APIKey)
+			request.Header.Set("Api-Username", APIUser)
+			request.Header.Set("Accept", "application/json")
+			var FinalResults []Results
+			var oData = QueryResult{}
 
+			res, err := DefaultClient.Do(request)
+			if err != nil {
+				fmt.Println("HTTP GET Failed!")
+				log.Fatal(err)
+			}
+			if res.StatusCode != 200 {
+				fmt.Println("Got other than Code 200")
+				log.Fatal(res.StatusCode)
+			}
+			data, err := ioutil.ReadAll(res.Body)
+			if err != nil {
+				fmt.Println("Body Empty")
+				log.Fatal("Got no Data")
+			}
+			res.Body.Close()
+			_ = json.Unmarshal(data, &oData)
+
+			var usernameColumn int
+			for z := 0; z < len(oData.Columns); z++ {
+				if oData.Columns[z] == "id" || oData.Columns[z] == "user_id" {
+					usernameColumn = z
+					break
+				}
+			}
+			l := len(oData.Rows)
+			//fmt.Printf("\nRequest Number:\t\t%d\nNumber of records: %d\n", x-1, l)
+			FinalResults = make([]Results, l)
+			for i := 0; i < len(oData.Rows); i++ {
+				//fmt.Println("Reading Record: " + strconv.Itoa(i))
+				rd := oData.Rows[i]
+				info, err := getUserName(int(rd[usernameColumn].(float64)))
+				if err != nil {
+					fmt.Println("Username get failed")
+					log.Fatal(err)
+				}
+				FinalResults[i].Username = info.Username
+				FinalResults[i].Name = info.Name
+				FinalResults[i].LastSeen = info.LastSeenAt
+				FinalResults[i].CreatedAt = info.CreatedAt
+				FinalResults[i].IPAddress = info.IPAddress
+				FinalResults[i].PostCount = info.PostCount
+				FinalResults[i].PostsCreated = info.PostCount
+				FinalResults[i].PostsRead = info.PostsReadCount
+				FinalResults[i].ID = info.ID
+				for b := 0; b < len(rd); b++ {
+					dType := fmt.Sprintf("%T", rd[b])
+					switch dType {
+					case "string":
+
+					case "float64":
+						if strings.Contains(oData.Columns[b], "average") {
+							FinalResults[i].AverageScore = rd[b].(float64)
+						} else if strings.Contains(oData.Columns[b], "solved") {
+							FinalResults[i].SolvedCount = int(rd[b].(float64))
+						} else {
+						}
+					case "int":
+					default:
+						fmt.Printf("Type %T Not defined\n", reflect.TypeOf(rd[b]))
+					}
+
+				}
+
+				// 		ID           int       `json:"user_id"`
+				// Username     string    `json:"username"`
+				// Name         string    `json:"name"`
+				// CreatedAt    time.Time `json:"created_at"`
+				// LastSeen     time.Time `json:"last_seen_at"`
+				// IPAddress    string    `json:"ip_address"`
+				// PostCount    int       `json:"post_count"`
+				// PostsCreated int       `json:"posts_created"`
+				// PostsRead    int       `json:"posts_read"`
+				// SolvedCount  int       `json:"solved_count"`
+				// AverageScore float64   `json:"average_score"`
+
+				// create point using fluent style
+				p := influxdb2.NewPointWithMeasurement("discourse").
+					AddTag("username", FinalResults[i].Username).
+					AddTag("name", FinalResults[i].Name).
+					AddTag("ip_address", FinalResults[i].IPAddress).
+					AddField("post_count", FinalResults[i].PostCount).
+					AddField("average_score", FinalResults[i].AverageScore).
+					AddField("posts_created", FinalResults[i].PostsCreated).
+					AddField("posts_read", FinalResults[i].PostsRead).
+					AddField("solved_count", FinalResults[i].SolvedCount).
+					AddField("username", FinalResults[i].Username).
+					AddField("username", FinalResults[i].Username).
+					AddField("name", FinalResults[i].LastSeen.Unix()).
+					AddField("created_at", FinalResults[i].LastSeen.Unix()).
+					SetTime(time.Now())
+				// write point asynchronously
+				writeAPI.WritePoint(p)
+				// Flush writes
+				writeAPI.Flush()
+				time.Sleep(1 * time.Second)
+			}
+			time.Sleep(5 * time.Second)
 		}
+		time.Sleep(30 * time.Second)
 	}
-	file, _ := json.MarshalIndent(FinalResults, "", " ")
-	_ = ioutil.WriteFile("test.json", file, 0644)
 }
