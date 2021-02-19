@@ -1,3 +1,5 @@
+<img src="https://img.shields.io/badge/Camunda%20DevRel%20Project-Created%20by%20the%20Camunda%20Developer%20Relations%20team-0Ba7B9">
+
 # DiscourseData
 
 This is a project to read data from the Discourse API. The ultimate goal is to leverage that data into Orbit in order to surface community members that might need extra attention, recognition, etc.
