@@ -6,7 +6,7 @@ This is a project to read data from the Discourse API. The ultimate goal is to l
 
 ## Reading from Discourse
 
-This requires installing the [discourse-data-explorer](https://github.com/discourse/discourse-data-explorer) plugin. There are a lot of included, and many more open source, queries that can be run against your Discourse instance. I chose 4 that suited our needs. You will see them defined in the source:
+This requires installing the [discourse-data-explorer](https://github.com/discourse/discourse-data-explorer) plugin. There are a lot of included, and many more open source, queries that can be run against your Discourse instance. I choose 4 that suited our needs. You will see them defined in the source:
 
 ```go
 const lurkers = "5"
